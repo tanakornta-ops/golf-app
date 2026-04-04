@@ -16,7 +16,7 @@ type HoleResult = {
   filled: boolean;
 };
 
-type PairwiseResult = {
+type GameResult = {
   holeResults: HoleResult[];
   playerTotals: number[];
   settledTransfers: Transfer[];
@@ -26,6 +26,8 @@ type PairwiseResult = {
 
 const PLAYER_COUNT = 4;
 const HOLES = 18;
+
+const DEFAULT_RULE_LABEL = 'เรท/คน/หลุม';
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
@@ -181,7 +183,7 @@ function formatMoney(value: number | string): string {
   return n.toLocaleString('th-TH');
 }
 
-function computePairwise(scores: ScoreCell[][], rate: number): PairwiseResult {
+function computeGame(scores: ScoreCell[][], rate: number): GameResult {
   const holeResults: HoleResult[] = [];
   const playerTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
   const transferMap = new Map<string, number>();
@@ -205,26 +207,25 @@ function computePairwise(scores: ScoreCell[][], rate: number): PairwiseResult {
       continue;
     }
 
+    const numericScores = holeScores as number[];
+    const minScore = Math.min(...numericScores);
+    const winners = numericScores
+      .map((score, idx) => ({ score, idx }))
+      .filter((item) => item.score === minScore)
+      .map((item) => item.idx);
+
     const nets = Array.from({ length: PLAYER_COUNT }, () => 0);
     const transfers: Transfer[] = [];
 
     for (let i = 0; i < PLAYER_COUNT; i += 1) {
-      for (let j = i + 1; j < PLAYER_COUNT; j += 1) {
-        const a = holeScores[i] as number;
-        const b = holeScores[j] as number;
+      if (winners.includes(i)) continue;
 
-        if (a < b) {
-          nets[i] += rate;
-          nets[j] -= rate;
-          transfers.push({ from: j, to: i, amount: rate });
-          addTransfer(j, i, rate);
-        } else if (a > b) {
-          nets[i] -= rate;
-          nets[j] += rate;
-          transfers.push({ from: i, to: j, amount: rate });
-          addTransfer(i, j, rate);
-        }
-      }
+      winners.forEach((winnerIdx) => {
+        nets[i] -= rate;
+        nets[winnerIdx] += rate;
+        transfers.push({ from: i, to: winnerIdx, amount: rate });
+        addTransfer(i, winnerIdx, rate);
+      });
     }
 
     nets.forEach((v, idx) => {
@@ -239,32 +240,17 @@ function computePairwise(scores: ScoreCell[][], rate: number): PairwiseResult {
     });
   }
 
-  const rawTransfers: Transfer[] = Array.from(transferMap.entries()).map(([key, amount]) => {
-    const [from, to] = key.split('->').map(Number);
-    return { from, to, amount };
-  });
-
-  const settled: Transfer[] = [];
-  const used = new Set<number>();
-
-  rawTransfers.forEach((t, idx) => {
-    if (used.has(idx) || t.amount <= 0) return;
-    const reverseIdx = rawTransfers.findIndex(
-      (r, rIdx) => !used.has(rIdx) && r.from === t.to && r.to === t.from
-    );
-    const reverseAmount = reverseIdx >= 0 ? rawTransfers[reverseIdx].amount : 0;
-    const net = t.amount - reverseAmount;
-
-    if (reverseIdx >= 0) used.add(reverseIdx);
-    used.add(idx);
-
-    if (net > 0) settled.push({ from: t.from, to: t.to, amount: net });
-    if (net < 0) settled.push({ from: t.to, to: t.from, amount: Math.abs(net) });
-  });
+  const settledTransfers: Transfer[] = Array.from(transferMap.entries())
+    .map(([key, amount]) => {
+      const [from, to] = key.split('->').map(Number);
+      return { from, to, amount };
+    })
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
 
   const receiveTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
   const payTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
-  settled.forEach((t) => {
+  settledTransfers.forEach((t) => {
     payTotals[t.from] += t.amount;
     receiveTotals[t.to] += t.amount;
   });
@@ -272,7 +258,7 @@ function computePairwise(scores: ScoreCell[][], rate: number): PairwiseResult {
   return {
     holeResults,
     playerTotals,
-    settledTransfers: settled.sort((a, b) => b.amount - a.amount),
+    settledTransfers,
     receiveTotals,
     payTotals,
   };
@@ -287,7 +273,7 @@ export default function GolfBettingWebApp() {
   const [rate, setRate] = useState<number>(20);
   const [scores, setScores] = useState<ScoreCell[][]>(makeInitialScores);
 
-  const result = useMemo(() => computePairwise(scores, Number(rate || 0)), [scores, rate]);
+  const result = useMemo(() => computeGame(scores, Number(rate || 0)), [scores, rate]);
 
   const updatePlayer = (index: number, value: string) => {
     const next = [...players];
@@ -312,8 +298,8 @@ export default function GolfBettingWebApp() {
       <div style={styles.container}>
         <div style={styles.gridTop}>
           <div style={styles.card}>
-            <h1 style={styles.title}>Golf Pairwise Betting App</h1>
-            <p style={styles.smallText}>เวอร์ชัน deploy ง่าย ไม่ต้องใช้ shadcn/ui หรือ lucide-react</p>
+            <h1 style={styles.title}>Golf Betting App</h1>
+            <p style={styles.smallText}>เวอร์ชัน deploy ง่าย พร้อมคำนวณเรท/คน/หลุม แบบแท้จริง</p>
             <div style={{ height: 16 }} />
             <div style={styles.playersRow}>
               {players.map((name, idx) => (
@@ -327,7 +313,7 @@ export default function GolfBettingWebApp() {
                 </div>
               ))}
               <div>
-                <label style={styles.label}>เรท/คู่/หลุม</label>
+                <label style={styles.label}>เรท/คน/หลุม</label>
                 <input
                   style={styles.input}
                   type="number"
@@ -339,9 +325,10 @@ export default function GolfBettingWebApp() {
             <div style={{ height: 16 }} />
             <div style={styles.badgeRow}>
               <span style={styles.badge}>4 คน</span>
-              <span style={styles.badge}>Pairwise</span>
+              <span style={styles.badge}>{DEFAULT_RULE_LABEL}</span>
               <span style={styles.badge}>สโตรคน้อยชนะ</span>
-              <span style={styles.badge}>เสมอไม่จ่าย</span>
+              <span style={styles.badge}>คนแพ้จ่ายผู้ชนะคนละเรท</span>
+              <span style={styles.badge}>เสมออันดับ 1 = ชนะร่วม</span>
             </div>
           </div>
 
