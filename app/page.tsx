@@ -2,10 +2,32 @@
 
 import React, { useMemo, useState } from 'react';
 
+type ScoreCell = number | '';
+type Transfer = {
+  from: number;
+  to: number;
+  amount: number;
+};
+
+type HoleResult = {
+  hole: number;
+  nets: number[];
+  transfers: Transfer[];
+  filled: boolean;
+};
+
+type PairwiseResult = {
+  holeResults: HoleResult[];
+  playerTotals: number[];
+  settledTransfers: Transfer[];
+  receiveTotals: number[];
+  payTotals: number[];
+};
+
 const PLAYER_COUNT = 4;
 const HOLES = 18;
 
-const styles = {
+const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
     background: '#f8fafc',
@@ -150,21 +172,21 @@ const styles = {
   },
 };
 
-const makeInitialPlayers = () => ['A', 'B', 'C', 'D'];
-const makeInitialScores = () =>
+const makeInitialPlayers = (): string[] => ['A', 'B', 'C', 'D'];
+const makeInitialScores = (): ScoreCell[][] =>
   Array.from({ length: HOLES }, () => Array.from({ length: PLAYER_COUNT }, () => ''));
 
-function formatMoney(value) {
+function formatMoney(value: number | string): string {
   const n = Number(value || 0);
   return n.toLocaleString('th-TH');
 }
 
-function computePairwise(scores, rate) {
-  const holeResults = [];
+function computePairwise(scores: ScoreCell[][], rate: number): PairwiseResult {
+  const holeResults: HoleResult[] = [];
   const playerTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
-  const transferMap = new Map();
+  const transferMap = new Map<string, number>();
 
-  const addTransfer = (from, to, amount) => {
+  const addTransfer = (from: number, to: number, amount: number) => {
     const key = `${from}->${to}`;
     transferMap.set(key, (transferMap.get(key) || 0) + amount);
   };
@@ -184,12 +206,12 @@ function computePairwise(scores, rate) {
     }
 
     const nets = Array.from({ length: PLAYER_COUNT }, () => 0);
-    const transfers = [];
+    const transfers: Transfer[] = [];
 
     for (let i = 0; i < PLAYER_COUNT; i += 1) {
       for (let j = i + 1; j < PLAYER_COUNT; j += 1) {
-        const a = holeScores[i];
-        const b = holeScores[j];
+        const a = holeScores[i] as number;
+        const b = holeScores[j] as number;
 
         if (a < b) {
           nets[i] += rate;
@@ -217,13 +239,13 @@ function computePairwise(scores, rate) {
     });
   }
 
-  const rawTransfers = Array.from(transferMap.entries()).map(([key, amount]) => {
+  const rawTransfers: Transfer[] = Array.from(transferMap.entries()).map(([key, amount]) => {
     const [from, to] = key.split('->').map(Number);
     return { from, to, amount };
   });
 
-  const settled = [];
-  const used = new Set();
+  const settled: Transfer[] = [];
+  const used = new Set<number>();
 
   rawTransfers.forEach((t, idx) => {
     if (used.has(idx) || t.amount <= 0) return;
@@ -256,24 +278,24 @@ function computePairwise(scores, rate) {
   };
 }
 
-function netColor(value) {
+function netColor(value: number): string {
   return value >= 0 ? '#059669' : '#dc2626';
 }
 
 export default function GolfBettingWebApp() {
-  const [players, setPlayers] = useState(makeInitialPlayers);
-  const [rate, setRate] = useState(20);
-  const [scores, setScores] = useState(makeInitialScores);
+  const [players, setPlayers] = useState<string[]>(makeInitialPlayers);
+  const [rate, setRate] = useState<number>(20);
+  const [scores, setScores] = useState<ScoreCell[][]>(makeInitialScores);
 
   const result = useMemo(() => computePairwise(scores, Number(rate || 0)), [scores, rate]);
 
-  const updatePlayer = (index, value) => {
+  const updatePlayer = (index: number, value: string) => {
     const next = [...players];
     next[index] = value || `P${index + 1}`;
     setPlayers(next);
   };
 
-  const updateScore = (holeIndex, playerIndex, value) => {
+  const updateScore = (holeIndex: number, playerIndex: number, value: string) => {
     const next = scores.map((row) => [...row]);
     next[holeIndex][playerIndex] = value === '' ? '' : Math.max(0, Number(value));
     setScores(next);
@@ -310,7 +332,7 @@ export default function GolfBettingWebApp() {
                   style={styles.input}
                   type="number"
                   value={rate}
-                  onChange={(e) => setRate(e.target.value)}
+                  onChange={(e) => setRate(Number(e.target.value) || 0)}
                 />
               </div>
             </div>
