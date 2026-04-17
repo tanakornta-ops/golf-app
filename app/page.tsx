@@ -24,10 +24,11 @@ type GameResult = {
   payTotals: number[];
 };
 
-const PLAYER_COUNT = 4;
 const HOLES = 18;
-
-const DEFAULT_RULE_LABEL = 'เรท/คน/หลุม';
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 8;
+const DEFAULT_PLAYER_COUNT = 4;
+const DEFAULT_RULE_LABEL = 'สโตรกมากจ่ายทุกคนที่สโตรกน้อยกว่า';
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
@@ -38,7 +39,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#0f172a',
   },
   container: {
-    maxWidth: '1200px',
+    maxWidth: '1280px',
     margin: '0 auto',
     display: 'grid',
     gap: '20px',
@@ -84,6 +85,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '10px 12px',
     fontSize: '14px',
     boxSizing: 'border-box',
+    background: '#fff',
   },
   button: {
     border: '1px solid #cbd5e1',
@@ -112,6 +114,11 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
     gap: '12px',
   },
+  controlsRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '12px',
+  },
   scoreTableWrap: {
     overflowX: 'auto',
   },
@@ -126,6 +133,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid #e2e8f0',
     fontSize: '14px',
     background: '#f8fafc',
+    whiteSpace: 'nowrap',
   },
   td: {
     padding: '10px 12px',
@@ -149,7 +157,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   holeNetGrid: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
     gap: '8px',
     marginTop: '10px',
   },
@@ -167,6 +175,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #e2e8f0',
     borderRadius: '16px',
     padding: '14px',
+    gap: '12px',
   },
   smallText: {
     fontSize: '13px',
@@ -174,9 +183,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
 };
 
-const makeInitialPlayers = (): string[] => ['A', 'B', 'C', 'D'];
-const makeInitialScores = (): ScoreCell[][] =>
-  Array.from({ length: HOLES }, () => Array.from({ length: PLAYER_COUNT }, () => ''));
+const makePlayers = (count: number): string[] =>
+  Array.from({ length: count }, (_, idx) => String.fromCharCode(65 + idx));
+
+const makeScores = (count: number): ScoreCell[][] =>
+  Array.from({ length: HOLES }, () => Array.from({ length: count }, () => ''));
 
 function formatMoney(value: number | string): string {
   const n = Number(value || 0);
@@ -184,8 +195,9 @@ function formatMoney(value: number | string): string {
 }
 
 function computeGame(scores: ScoreCell[][], rate: number): GameResult {
+  const playerCount = scores[0]?.length ?? 0;
   const holeResults: HoleResult[] = [];
-  const playerTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
+  const playerTotals = Array.from({ length: playerCount }, () => 0);
   const transferMap = new Map<string, number>();
 
   const addTransfer = (from: number, to: number, amount: number) => {
@@ -194,13 +206,14 @@ function computeGame(scores: ScoreCell[][], rate: number): GameResult {
   };
 
   for (let h = 0; h < HOLES; h += 1) {
-    const holeScores = scores[h].map((v) => (v === '' ? '' : Number(v)));
-    const allFilled = holeScores.every((v) => v !== '' && !Number.isNaN(v));
+    const holeScores = (scores[h] || []).map((v) => (v === '' ? '' : Number(v)));
+    const allFilled =
+      holeScores.length === playerCount && holeScores.every((v) => v !== '' && !Number.isNaN(v));
 
     if (!allFilled) {
       holeResults.push({
         hole: h + 1,
-        nets: Array.from({ length: PLAYER_COUNT }, () => 0),
+        nets: Array.from({ length: playerCount }, () => 0),
         transfers: [],
         filled: false,
       });
@@ -208,24 +221,23 @@ function computeGame(scores: ScoreCell[][], rate: number): GameResult {
     }
 
     const numericScores = holeScores as number[];
-    const minScore = Math.min(...numericScores);
-    const winners = numericScores
-      .map((score, idx) => ({ score, idx }))
-      .filter((item) => item.score === minScore)
-      .map((item) => item.idx);
-
-    const nets = Array.from({ length: PLAYER_COUNT }, () => 0);
+    const nets = Array.from({ length: playerCount }, () => 0);
     const transfers: Transfer[] = [];
 
-    for (let i = 0; i < PLAYER_COUNT; i += 1) {
-      if (winners.includes(i)) continue;
+    for (let i = 0; i < playerCount; i += 1) {
+      for (let j = 0; j < playerCount; j += 1) {
+        if (i === j) continue;
 
-      winners.forEach((winnerIdx) => {
-        nets[i] -= rate;
-        nets[winnerIdx] += rate;
-        transfers.push({ from: i, to: winnerIdx, amount: rate });
-        addTransfer(i, winnerIdx, rate);
-      });
+        const myScore = numericScores[i];
+        const otherScore = numericScores[j];
+
+        if (myScore > otherScore) {
+          nets[i] -= rate;
+          nets[j] += rate;
+          transfers.push({ from: i, to: j, amount: rate });
+          addTransfer(i, j, rate);
+        }
+      }
     }
 
     nets.forEach((v, idx) => {
@@ -248,8 +260,8 @@ function computeGame(scores: ScoreCell[][], rate: number): GameResult {
     .filter((item) => item.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 
-  const receiveTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
-  const payTotals = Array.from({ length: PLAYER_COUNT }, () => 0);
+  const receiveTotals = Array.from({ length: playerCount }, () => 0);
+  const payTotals = Array.from({ length: playerCount }, () => 0);
   settledTransfers.forEach((t) => {
     payTotals[t.from] += t.amount;
     receiveTotals[t.to] += t.amount;
@@ -269,9 +281,10 @@ function netColor(value: number): string {
 }
 
 export default function GolfBettingWebApp() {
-  const [players, setPlayers] = useState<string[]>(makeInitialPlayers);
+  const [playerCount, setPlayerCount] = useState<number>(DEFAULT_PLAYER_COUNT);
+  const [players, setPlayers] = useState<string[]>(makePlayers(DEFAULT_PLAYER_COUNT));
   const [rate, setRate] = useState<number>(20);
-  const [scores, setScores] = useState<ScoreCell[][]>(makeInitialScores);
+  const [scores, setScores] = useState<ScoreCell[][]>(makeScores(DEFAULT_PLAYER_COUNT));
 
   const result = useMemo(() => computeGame(scores, Number(rate || 0)), [scores, rate]);
 
@@ -281,6 +294,19 @@ export default function GolfBettingWebApp() {
     setPlayers(next);
   };
 
+  const updatePlayerCount = (nextCountRaw: string) => {
+    const nextCount = Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, Number(nextCountRaw) || DEFAULT_PLAYER_COUNT));
+    setPlayerCount(nextCount);
+
+    const nextPlayers = Array.from({ length: nextCount }, (_, idx) => players[idx] || `P${idx + 1}`);
+    setPlayers(nextPlayers);
+
+    const nextScores = Array.from({ length: HOLES }, (_, holeIdx) =>
+      Array.from({ length: nextCount }, (_, playerIdx) => scores[holeIdx]?.[playerIdx] ?? '')
+    );
+    setScores(nextScores);
+  };
+
   const updateScore = (holeIndex: number, playerIndex: number, value: string) => {
     const next = scores.map((row) => [...row]);
     next[holeIndex][playerIndex] = value === '' ? '' : Math.max(0, Number(value));
@@ -288,9 +314,10 @@ export default function GolfBettingWebApp() {
   };
 
   const resetAll = () => {
-    setPlayers(makeInitialPlayers());
+    setPlayerCount(DEFAULT_PLAYER_COUNT);
+    setPlayers(makePlayers(DEFAULT_PLAYER_COUNT));
     setRate(20);
-    setScores(makeInitialScores());
+    setScores(makeScores(DEFAULT_PLAYER_COUNT));
   };
 
   return (
@@ -299,8 +326,31 @@ export default function GolfBettingWebApp() {
         <div style={styles.gridTop}>
           <div style={styles.card}>
             <h1 style={styles.title}>Golf Betting App</h1>
-            <p style={styles.smallText}>เวอร์ชัน deploy ง่าย พร้อมคำนวณเรท/คน/หลุม แบบแท้จริง</p>
+            <p style={styles.smallText}>เวอร์ชัน deploy ง่าย พร้อมคำนวณแบบสโตรกมากจ่ายให้ทุกคนที่สโตรกน้อยกว่า</p>
             <div style={{ height: 16 }} />
+            <div style={styles.controlsRow}>
+              <div>
+                <label style={styles.label}>จำนวนผู้เล่น</label>
+                <input
+                  style={styles.input}
+                  type="number"
+                  min={MIN_PLAYERS}
+                  max={MAX_PLAYERS}
+                  value={playerCount}
+                  onChange={(e) => updatePlayerCount(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={styles.label}>เรท/คน/หลุม</label>
+                <input
+                  style={styles.input}
+                  type="number"
+                  value={rate}
+                  onChange={(e) => setRate(Number(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+            <div style={{ height: 12 }} />
             <div style={styles.playersRow}>
               {players.map((name, idx) => (
                 <div key={idx}>
@@ -312,23 +362,13 @@ export default function GolfBettingWebApp() {
                   />
                 </div>
               ))}
-              <div>
-                <label style={styles.label}>เรท/คน/หลุม</label>
-                <input
-                  style={styles.input}
-                  type="number"
-                  value={rate}
-                  onChange={(e) => setRate(Number(e.target.value) || 0)}
-                />
-              </div>
             </div>
             <div style={{ height: 16 }} />
             <div style={styles.badgeRow}>
-              <span style={styles.badge}>4 คน</span>
+              <span style={styles.badge}>{playerCount} คน</span>
               <span style={styles.badge}>{DEFAULT_RULE_LABEL}</span>
-              <span style={styles.badge}>สโตรคน้อยชนะ</span>
-              <span style={styles.badge}>คนแพ้จ่ายผู้ชนะคนละเรท</span>
-              <span style={styles.badge}>เสมออันดับ 1 = ชนะร่วม</span>
+              <span style={styles.badge}>เรท/คน/หลุม</span>
+              <span style={styles.badge}>สโตรกเท่ากัน = ไม่ต้องจ่ายกัน</span>
             </div>
           </div>
 
@@ -337,13 +377,13 @@ export default function GolfBettingWebApp() {
             <div style={{ height: 12 }} />
             <div style={{ display: 'grid', gap: 10 }}>
               {players.map((name, idx) => {
-                const net = result.playerTotals[idx];
+                const net = result.playerTotals[idx] ?? 0;
                 return (
                   <div key={idx} style={styles.summaryBox}>
                     <div>
                       <div style={{ fontWeight: 700 }}>{name}</div>
                       <div style={styles.smallText}>
-                        รับ {formatMoney(result.receiveTotals[idx])} / จ่าย {formatMoney(result.payTotals[idx])}
+                        รับ {formatMoney(result.receiveTotals[idx] ?? 0)} / จ่าย {formatMoney(result.payTotals[idx] ?? 0)}
                       </div>
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: netColor(net) }}>
@@ -407,7 +447,7 @@ export default function GolfBettingWebApp() {
                     <>
                       <div style={styles.holeNetGrid}>
                         {players.map((name, idx) => {
-                          const net = hole.nets[idx];
+                          const net = hole.nets[idx] ?? 0;
                           return (
                             <div key={idx} style={styles.holeNetItem}>
                               <span>{name}</span>
@@ -420,7 +460,7 @@ export default function GolfBettingWebApp() {
                       </div>
                       <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
                         {hole.transfers.length === 0 ? (
-                          <div style={styles.smallText}>เสมอทุกคู่</div>
+                          <div style={styles.smallText}>ไม่มีรายการจ่ายในหลุมนี้</div>
                         ) : (
                           hole.transfers.map((t, idx) => (
                             <div key={idx} style={styles.smallText}>
@@ -431,7 +471,7 @@ export default function GolfBettingWebApp() {
                       </div>
                     </>
                   ) : (
-                    <div style={{ ...styles.smallText, marginTop: 10 }}>รอกรอกคะแนนให้ครบ 4 คน</div>
+                    <div style={{ ...styles.smallText, marginTop: 10 }}>รอกรอกคะแนนให้ครบทุกคน</div>
                   )}
                 </div>
               ))}
@@ -451,7 +491,7 @@ export default function GolfBettingWebApp() {
                       <div style={{ fontWeight: 700 }}>
                         {players[t.from]} → {players[t.to]}
                       </div>
-                      <div style={styles.smallText}>ยอดสุทธิหลังหักกันแล้ว</div>
+                      <div style={styles.smallText}>ยอดสุทธิหลังรวมทุกหลุม</div>
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 700 }}>{formatMoney(t.amount)} บาท</div>
                   </div>
