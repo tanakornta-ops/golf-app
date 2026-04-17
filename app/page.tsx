@@ -306,6 +306,8 @@ type AppState = {
   scores: ScoreCell[][];
 };
 
+type ViewMode = 'mobile' | 'desktop';
+
 function downloadTextFile(filename: string, content: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -337,12 +339,24 @@ function netColor(value: number): string {
 }
 
 export default function GolfBettingWebApp() {
+  const [viewMode, setViewMode] = useState<ViewMode>('desktop');
   const [playerCount, setPlayerCount] = useState<number>(DEFAULT_PLAYER_COUNT);
   const [players, setPlayers] = useState<string[]>(makePlayers(DEFAULT_PLAYER_COUNT));
   const [rate, setRate] = useState<number>(20);
   const [scores, setScores] = useState<ScoreCell[][]>(makeScores(DEFAULT_PLAYER_COUNT));
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [message, setMessage] = useState<string>('');
+
+  useEffect(() => {
+    const updateViewMode = () => {
+      setViewMode(window.innerWidth < 768 ? 'mobile' : 'desktop');
+    };
+
+    updateViewMode();
+    window.addEventListener('resize', updateViewMode);
+
+    return () => window.removeEventListener('resize', updateViewMode);
+  }, []);
 
   useEffect(() => {
     try {
@@ -550,38 +564,65 @@ export default function GolfBettingWebApp() {
         </div>
 
         <div style={styles.card}>
-          <h2 style={styles.subtitle}>กรอกสโตรครายหลุม</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h2 style={styles.subtitle}>กรอกสโตรครายหลุม</h2>
+            <span style={styles.badge}>{viewMode === 'mobile' ? 'Mobile view' : 'Desktop view'}</span>
+          </div>
           <div style={{ height: 12 }} />
-          <div style={styles.scoreTableWrap}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>หลุม</th>
-                  {players.map((name, idx) => (
-                    <th style={styles.th} key={idx}>{name}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {scores.map((row, holeIdx) => (
-                  <tr key={holeIdx}>
-                    <td style={styles.td}>{holeIdx + 1}</td>
+          {viewMode === 'mobile' ? (
+            <div style={{ display: 'grid', gap: 12 }}>
+              {scores.map((row, holeIdx) => (
+                <div key={holeIdx} style={styles.holeCard}>
+                  <div style={{ fontWeight: 700, marginBottom: 10 }}>หลุม {holeIdx + 1}</div>
+                  <div style={styles.playersRow}>
                     {row.map((value, playerIdx) => (
-                      <td style={styles.td} key={playerIdx}>
+                      <div key={playerIdx}>
+                        <label style={styles.label}>{players[playerIdx]}</label>
                         <input
-                          style={{ ...styles.input, width: '100%', minWidth: 72 }}
+                          style={styles.input}
                           type="number"
                           min="1"
                           value={value}
                           onChange={(e) => updateScore(holeIdx, playerIdx, e.target.value)}
                         />
-                      </td>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={styles.scoreTableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>หลุม</th>
+                    {players.map((name, idx) => (
+                      <th style={styles.th} key={idx}>{name}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {scores.map((row, holeIdx) => (
+                    <tr key={holeIdx}>
+                      <td style={styles.td}>{holeIdx + 1}</td>
+                      {row.map((value, playerIdx) => (
+                        <td style={styles.td} key={playerIdx}>
+                          <input
+                            style={{ ...styles.input, width: '100%', minWidth: 72 }}
+                            type="number"
+                            min="1"
+                            value={value}
+                            onChange={(e) => updateScore(holeIdx, playerIdx, e.target.value)}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div style={styles.gridBottom}>
