@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 type ScoreCell = number | '';
 type Transfer = {
@@ -29,16 +29,25 @@ const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
 const DEFAULT_PLAYER_COUNT = 4;
 const DEFAULT_RULE_LABEL = 'สโตรกมากจ่ายทุกคนที่สโตรกน้อยกว่า';
+const APP_VERSION = 'v1.2.0';
+const STORAGE_KEY = 'golf-betting-app-state-v1.2.0';
 
 const styles: Record<string, React.CSSProperties> = {
+  actionRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '10px',
+    alignItems: 'center',
+  },
   page: {
     minHeight: '100vh',
     background: '#f8fafc',
-    padding: '24px',
+    padding: 'clamp(12px, 2vw, 24px)',
     fontFamily: 'Arial, sans-serif',
     color: '#0f172a',
   },
   container: {
+    width: '100%',
     maxWidth: '1280px',
     margin: '0 auto',
     display: 'grid',
@@ -58,18 +67,21 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#ffffff',
     border: '1px solid #e2e8f0',
     borderRadius: '18px',
-    padding: '20px',
+    padding: 'clamp(14px, 2vw, 20px)',
     boxShadow: '0 1px 3px rgba(15, 23, 42, 0.06)',
+    minWidth: 0,
   },
   title: {
-    fontSize: '28px',
+    fontSize: 'clamp(22px, 4vw, 28px)',
     fontWeight: 700,
     margin: 0,
+    lineHeight: 1.2,
   },
   subtitle: {
-    fontSize: '20px',
+    fontSize: 'clamp(18px, 3vw, 20px)',
     fontWeight: 700,
     margin: 0,
+    lineHeight: 1.25,
   },
   label: {
     fontSize: '14px',
@@ -80,10 +92,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   input: {
     width: '100%',
+    minWidth: 0,
     border: '1px solid #cbd5e1',
     borderRadius: '12px',
     padding: '10px 12px',
-    fontSize: '14px',
+    fontSize: '16px',
     boxSizing: 'border-box',
     background: '#fff',
   },
@@ -92,9 +105,11 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#ffffff',
     borderRadius: '12px',
     padding: '10px 14px',
-    fontSize: '14px',
+    fontSize: '15px',
     fontWeight: 600,
     cursor: 'pointer',
+    flex: '1 1 180px',
+    maxWidth: '100%',
   },
   badgeRow: {
     display: 'flex',
@@ -121,11 +136,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   scoreTableWrap: {
     overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
   },
   table: {
     width: '100%',
     borderCollapse: 'collapse',
-    minWidth: '560px',
+    minWidth: 'max-content',
   },
   th: {
     textAlign: 'left',
@@ -148,6 +164,8 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #e2e8f0',
     borderRadius: '16px',
     padding: '12px 14px',
+    gap: '10px',
+    flexWrap: 'wrap',
   },
   holeCard: {
     border: '1px solid #e2e8f0',
@@ -167,6 +185,8 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#f8fafc',
     borderRadius: '12px',
     padding: '10px 12px',
+    gap: '10px',
+    flexWrap: 'wrap',
   },
   transferItem: {
     display: 'flex',
@@ -176,10 +196,13 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '16px',
     padding: '14px',
     gap: '12px',
+    flexWrap: 'wrap',
   },
   smallText: {
-    fontSize: '13px',
+    fontSize: '14px',
     color: '#64748b',
+    lineHeight: 1.5,
+    wordBreak: 'break-word',
   },
 };
 
@@ -276,6 +299,39 @@ function computeGame(scores: ScoreCell[][], rate: number): GameResult {
   };
 }
 
+type AppState = {
+  playerCount: number;
+  players: string[];
+  rate: number;
+  scores: ScoreCell[][];
+};
+
+function downloadTextFile(filename: string, content: string, mimeType: string): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function sanitizeImportedState(parsed: Partial<AppState>): AppState {
+  const nextPlayerCount = Math.min(
+    MAX_PLAYERS,
+    Math.max(MIN_PLAYERS, Number(parsed.playerCount) || DEFAULT_PLAYER_COUNT)
+  );
+
+  return {
+    playerCount: nextPlayerCount,
+    players: Array.from({ length: nextPlayerCount }, (_, idx) => parsed.players?.[idx] || `P${idx + 1}`),
+    rate: Number(parsed.rate) || 20,
+    scores: Array.from({ length: HOLES }, (_, holeIdx) =>
+      Array.from({ length: nextPlayerCount }, (_, playerIdx) => parsed.scores?.[holeIdx]?.[playerIdx] ?? '')
+    ),
+  };
+}
+
 function netColor(value: number): string {
   return value >= 0 ? '#059669' : '#dc2626';
 }
@@ -285,6 +341,43 @@ export default function GolfBettingWebApp() {
   const [players, setPlayers] = useState<string[]>(makePlayers(DEFAULT_PLAYER_COUNT));
   const [rate, setRate] = useState<number>(20);
   const [scores, setScores] = useState<ScoreCell[][]>(makeScores(DEFAULT_PLAYER_COUNT));
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
+  const [message, setMessage] = useState<string>('');
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<AppState>;
+        const nextState = sanitizeImportedState(parsed);
+        setPlayerCount(nextState.playerCount);
+        setPlayers(nextState.players);
+        setRate(nextState.rate);
+        setScores(nextState.scores);
+      }
+    } catch (error) {
+      console.error('Failed to load saved state', error);
+    } finally {
+      setIsLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const appState: AppState = {
+      playerCount,
+      players,
+      rate,
+      scores,
+    };
+
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+    } catch (error) {
+      console.error('Failed to save state', error);
+    }
+  }, [isLoaded, playerCount, players, rate, scores]);
 
   const result = useMemo(() => computeGame(scores, Number(rate || 0)), [scores, rate]);
 
@@ -318,6 +411,48 @@ export default function GolfBettingWebApp() {
     setPlayers(makePlayers(DEFAULT_PLAYER_COUNT));
     setRate(20);
     setScores(makeScores(DEFAULT_PLAYER_COUNT));
+    setMessage('รีเซ็ตทั้งหมดแล้ว');
+  };
+
+  const startNewRound = () => {
+    setScores(makeScores(playerCount));
+    setMessage('เริ่มรอบใหม่แล้ว โดยคงชื่อผู้เล่นและเรทเดิมไว้');
+  };
+
+  const clearSavedData = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    setMessage('ล้างข้อมูลที่บันทึกไว้บนเครื่องนี้แล้ว');
+  };
+
+  const exportJson = () => {
+    const payload: AppState = { playerCount, players, rate, scores };
+    downloadTextFile(
+      `golf-betting-${APP_VERSION}.json`,
+      JSON.stringify(payload, null, 2),
+      'application/json'
+    );
+    setMessage('Export JSON เรียบร้อยแล้ว');
+  };
+
+  const importJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Partial<AppState>;
+      const nextState = sanitizeImportedState(parsed);
+      setPlayerCount(nextState.playerCount);
+      setPlayers(nextState.players);
+      setRate(nextState.rate);
+      setScores(nextState.scores);
+      setMessage('Import JSON เรียบร้อยแล้ว');
+    } catch (error) {
+      console.error('Failed to import state', error);
+      setMessage('Import JSON ไม่สำเร็จ');
+    }
+
+    event.target.value = '';
   };
 
   return (
@@ -325,8 +460,11 @@ export default function GolfBettingWebApp() {
       <div style={styles.container}>
         <div style={styles.gridTop}>
           <div style={styles.card}>
-            <h1 style={styles.title}>Golf Betting App</h1>
-            <p style={styles.smallText}>เวอร์ชัน deploy ง่าย พร้อมคำนวณแบบสโตรกมากจ่ายให้ทุกคนที่สโตรกน้อยกว่า</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <h1 style={styles.title}>Golf Betting App</h1>
+              <span style={styles.badge}>{APP_VERSION}</span>
+            </div>
+            <p style={styles.smallText}>เวอร์ชัน deploy ง่าย พร้อมคำนวณแบบสโตรกมากจ่ายให้ทุกคนที่สโตรกน้อยกว่า จำค่าล่าสุดอัตโนมัติ และรองรับ export/import</p>
             <div style={{ height: 16 }} />
             <div style={styles.controlsRow}>
               <div>
@@ -369,7 +507,21 @@ export default function GolfBettingWebApp() {
               <span style={styles.badge}>{DEFAULT_RULE_LABEL}</span>
               <span style={styles.badge}>เรท/คน/หลุม</span>
               <span style={styles.badge}>สโตรกเท่ากัน = ไม่ต้องจ่ายกัน</span>
+              <span style={styles.badge}>{APP_VERSION}</span>
             </div>
+            <div style={{ height: 14 }} />
+            <div style={{ ...styles.actionRow, alignItems: 'stretch' }}>
+              <button style={styles.button} onClick={startNewRound}>เริ่มรอบใหม่</button>
+              <button style={styles.button} onClick={resetAll}>รีเซ็ตทั้งหมด</button>
+              <button style={styles.button} onClick={clearSavedData}>ล้างข้อมูลที่บันทึก</button>
+              <button style={styles.button} onClick={exportJson}>Export JSON</button>
+              <label style={{ ...styles.button, display: 'inline-flex', alignItems: 'center' }}>
+                Import JSON
+                <input type="file" accept="application/json" onChange={importJson} style={{ display: 'none' }} />
+              </label>
+            </div>
+            <div style={{ height: 10 }} />
+            <div style={styles.smallText}>{message || 'ข้อมูลจะถูกบันทึกอัตโนมัติบนเครื่องนี้'}</div>
           </div>
 
           <div style={styles.card}>
@@ -392,7 +544,7 @@ export default function GolfBettingWebApp() {
                   </div>
                 );
               })}
-              <button style={styles.button} onClick={resetAll}>รีเซ็ต</button>
+              <div style={styles.smallText}>บันทึกข้อมูลล่าสุดอัตโนมัติบนเครื่องนี้</div>
             </div>
           </div>
         </div>
@@ -417,7 +569,7 @@ export default function GolfBettingWebApp() {
                     {row.map((value, playerIdx) => (
                       <td style={styles.td} key={playerIdx}>
                         <input
-                          style={{ ...styles.input, width: 88 }}
+                          style={{ ...styles.input, width: '100%', minWidth: 72 }}
                           type="number"
                           min="1"
                           value={value}
