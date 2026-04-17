@@ -307,6 +307,7 @@ type AppState = {
 };
 
 type ViewMode = 'mobile' | 'desktop';
+type MobileTab = 'scores' | 'summary' | 'transfers';
 
 function downloadTextFile(filename: string, content: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });
@@ -340,6 +341,8 @@ function netColor(value: number): string {
 
 export default function GolfBettingWebApp() {
   const [viewMode, setViewMode] = useState<ViewMode>('desktop');
+  const [mobileTab, setMobileTab] = useState<MobileTab>('scores');
+  const [currentHole, setCurrentHole] = useState<number>(0);
   const [playerCount, setPlayerCount] = useState<number>(DEFAULT_PLAYER_COUNT);
   const [players, setPlayers] = useState<string[]>(makePlayers(DEFAULT_PLAYER_COUNT));
   const [rate, setRate] = useState<number>(20);
@@ -419,6 +422,10 @@ export default function GolfBettingWebApp() {
     next[holeIndex][playerIndex] = value === '' ? '' : Math.max(0, Number(value));
     setScores(next);
   };
+
+  const goPrevHole = () => setCurrentHole((prev) => Math.max(0, prev - 1));
+
+  const goNextHole = () => setCurrentHole((prev) => Math.min(HOLES - 1, prev + 1));
 
   const resetAll = () => {
     setPlayerCount(DEFAULT_PLAYER_COUNT);
@@ -538,8 +545,17 @@ export default function GolfBettingWebApp() {
             <div style={styles.smallText}>{message || 'ข้อมูลจะถูกบันทึกอัตโนมัติบนเครื่องนี้'}</div>
           </div>
 
-          <div style={styles.card}>
-            <h2 style={styles.subtitle}>สรุปสุทธิ</h2>
+          <div style={{ ...styles.card, position: viewMode === 'mobile' ? 'sticky' : 'static', top: viewMode === 'mobile' ? 12 : undefined, zIndex: viewMode === 'mobile' ? 5 : undefined }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <h2 style={styles.subtitle}>สรุปสุทธิ</h2>
+              {viewMode === 'mobile' ? (
+                <div style={styles.badgeRow}>
+                  <button style={{ ...styles.button, flex: '0 0 auto', maxWidth: 'none' }} onClick={() => setMobileTab('scores')}>คะแนน</button>
+                  <button style={{ ...styles.button, flex: '0 0 auto', maxWidth: 'none' }} onClick={() => setMobileTab('summary')}>รายหลุม</button>
+                  <button style={{ ...styles.button, flex: '0 0 auto', maxWidth: 'none' }} onClick={() => setMobileTab('transfers')}>โอน</button>
+                </div>
+              ) : null}
+            </div>
             <div style={{ height: 12 }} />
             <div style={{ display: 'grid', gap: 10 }}>
               {players.map((name, idx) => {
@@ -570,26 +586,33 @@ export default function GolfBettingWebApp() {
           </div>
           <div style={{ height: 12 }} />
           {viewMode === 'mobile' ? (
-            <div style={{ display: 'grid', gap: 12 }}>
-              {scores.map((row, holeIdx) => (
-                <div key={holeIdx} style={styles.holeCard}>
-                  <div style={{ fontWeight: 700, marginBottom: 10 }}>หลุม {holeIdx + 1}</div>
-                  <div style={styles.playersRow}>
-                    {row.map((value, playerIdx) => (
-                      <div key={playerIdx}>
-                        <label style={styles.label}>{players[playerIdx]}</label>
-                        <input
-                          style={styles.input}
-                          type="number"
-                          min="1"
-                          value={value}
-                          onChange={(e) => updateScore(holeIdx, playerIdx, e.target.value)}
-                        />
-                      </div>
-                    ))}
+            <div style={{ display: mobileTab === 'scores' ? 'grid' : 'none', gap: 12 }}>
+              <div style={{ ...styles.holeCard, position: 'sticky', top: 108, zIndex: 4, background: '#ffffff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 700 }}>หลุม {currentHole + 1} / {HOLES}</div>
+                  <div style={styles.actionRow}>
+                    <button style={{ ...styles.button, flex: '0 0 auto', maxWidth: 'none' }} onClick={goPrevHole} disabled={currentHole === 0}>ก่อนหน้า</button>
+                    <button style={{ ...styles.button, flex: '0 0 auto', maxWidth: 'none' }} onClick={goNextHole} disabled={currentHole === HOLES - 1}>ถัดไป</button>
                   </div>
                 </div>
-              ))}
+              </div>
+              <div style={styles.holeCard}>
+                <div style={{ fontWeight: 700, marginBottom: 10 }}>กรอกคะแนนหลุม {currentHole + 1}</div>
+                <div style={styles.playersRow}>
+                  {scores[currentHole].map((value, playerIdx) => (
+                    <div key={playerIdx}>
+                      <label style={styles.label}>{players[playerIdx]}</label>
+                      <input
+                        style={styles.input}
+                        type="number"
+                        min="1"
+                        value={value}
+                        onChange={(e) => updateScore(currentHole, playerIdx, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
             <div style={styles.scoreTableWrap}>
@@ -626,7 +649,7 @@ export default function GolfBettingWebApp() {
         </div>
 
         <div style={styles.gridBottom}>
-          <div style={styles.card}>
+          <div style={{ ...styles.card, display: viewMode === 'mobile' && mobileTab !== 'summary' ? 'none' : 'block' }}>
             <h2 style={styles.subtitle}>สรุปรายหลุม</h2>
             <div style={{ height: 12 }} />
             <div style={{ maxHeight: 560, overflow: 'auto' }}>
@@ -671,7 +694,7 @@ export default function GolfBettingWebApp() {
             </div>
           </div>
 
-          <div style={styles.card}>
+          <div style={{ ...styles.card, display: viewMode === 'mobile' && mobileTab !== 'transfers' ? 'none' : 'block' }}>
             <h2 style={styles.subtitle}>สรุปโอนเงินจริง</h2>
             <div style={{ height: 12 }} />
             <div style={{ display: 'grid', gap: 10 }}>
